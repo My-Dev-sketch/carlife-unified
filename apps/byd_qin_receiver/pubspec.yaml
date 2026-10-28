@@ -1,0 +1,22 @@
+name: byd_qin_receiver
+description: BYD Qin Plus DiLink OS 60fps Hardware H.264 CarLife Receiver APK with Waze Split-Screen & Touch Return.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  carlife_protocol:
+    path: ../../packages/carlife_protocol
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

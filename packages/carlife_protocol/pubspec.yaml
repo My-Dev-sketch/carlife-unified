@@ -1,0 +1,16 @@
+name: carlife_protocol
+description: Complete Baidu CarLife wire protocol port from ft-app (6 TCP channels, UDP 7999/8999 discovery, ProtoLite wire encoder/decoder, RSA/AES-128-ECB crypto, VideoFeed state machine, MediaStream, NavigationRelay HUD, ICCOA BLE offer parser).
+version: 1.0.0
+publish_to: 'none'
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+dependencies:
+  pointycastle: ^3.9.1
+  asn1lib: ^1.5.3
+  meta: ^1.11.0
+
+dev_dependencies:
+  test: ^1.25.0
+  lints: ^4.0.0

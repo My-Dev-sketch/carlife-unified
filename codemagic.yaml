@@ -1,0 +1,98 @@
+workflows:
+  ios-carlife-sender-testflight:
+    name: iOS CarLife 60fps Sender (iPhone 15 Pro Max -> TestFlight / App Store Connect)
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    working_directory: apps/ios_carlife_sender
+    integrations:
+      app_store_connect: codemagic
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.mydevsketch.iosCarlifeSender
+      vars:
+        BUNDLE_ID: "com.mydevsketch.iosCarlifeSender"
+        XCODE_WORKSPACE: "ios/Runner.xcworkspace"
+        XCODE_SCHEME: "Runner"
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    triggering:
+      events:
+        - push
+        - tag
+      branch_patterns:
+        - pattern: main
+          include: true
+          source: true
+    scripts:
+      - name: Run CarLife Protocol Unit & Loopback Tests
+        script: |
+          cd $CM_BUILD_DIR/packages/carlife_protocol
+          flutter pub get
+          dart test
+      - name: Get Flutter Packages for iOS Sender
+        script: |
+          cd $CM_BUILD_DIR/apps/ios_carlife_sender
+          flutter pub get
+      - name: Run iOS Sender Widget & Analyzer Checks
+        script: |
+          cd $CM_BUILD_DIR/apps/ios_carlife_sender
+          flutter analyze
+          flutter test
+      - name: Install CocoaPods Dependencies
+        script: |
+          find . -name "Podfile" -execdir pod install \;
+      - name: Set up Code Signing Settings on Xcode Project
+        script: |
+          xcode-project use-profiles
+      - name: Increment Build Number & Build Signed Release IPA
+        script: |
+          cd $CM_BUILD_DIR/apps/ios_carlife_sender
+          LATEST_BUILD_NUMBER=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID" || echo 1)
+          if [ -z "$LATEST_BUILD_NUMBER" ]; then
+            LATEST_BUILD_NUMBER=1
+          fi
+          NEXT_BUILD_NUMBER=$((LATEST_BUILD_NUMBER + 1))
+          flutter build ipa --release \
+            --build-name=1.0.0 \
+            --build-number=$NEXT_BUILD_NUMBER \
+            --export-options-plist=/Users/builder/export_options.plist
+    artifacts:
+      - apps/ios_carlife_sender/build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - apps/ios_carlife_sender/flutter_drive.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        submit_to_app_store: false
+
+  byd-qin-receiver-apk:
+    name: BYD Qin Plus DiLink Receiver APK (Release Build)
+    max_build_duration: 45
+    instance_type: mac_mini_m2
+    working_directory: apps/byd_qin_receiver
+    environment:
+      flutter: stable
+      java: 17
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+          source: true
+    scripts:
+      - name: Get Flutter Packages & Run Tests
+        script: |
+          cd $CM_BUILD_DIR/apps/byd_qin_receiver
+          flutter pub get
+          flutter analyze
+          flutter test
+      - name: Build BYD Qin Plus Release APK
+        script: |
+          cd $CM_BUILD_DIR/apps/byd_qin_receiver
+          flutter build apk --release
+    artifacts:
+      - apps/byd_qin_receiver/build/app/outputs/flutter-apk/*.apk

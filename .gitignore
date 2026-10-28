@@ -1,0 +1,23 @@
+# Flutter / Dart / Xcode / Gradle ignores
+.dart_tool/
+.packages
+build/
+.pub-cache/
+.pub/
+*.iml
+*.ipr
+*.iws
+.idea/
+.vscode/
+.DS_Store
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Flutter.podspec
+**/ios/Flutter/ephemeral/
+**/android/.gradle/
+**/android/local.properties
+**/android/captures/
+**/android/key.properties
+*.jks
+*.keystore
