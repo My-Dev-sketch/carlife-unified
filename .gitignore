@@ -21,3 +21,4 @@ build/
 **/android/key.properties
 *.jks
 *.keystore
+*.mp4

@@ -101,13 +101,20 @@ class IosVideoPipelineBridge {
     _captureTimer = Timer.periodic(Duration(milliseconds: intervalMs), (_) async {
       if (_encodingFrame) return;
       if (currentTier == ProjectionModeTier.tier3FullIphoneReplayKitMirror) {
-        // In Tier 3, RPScreenRecorder pushes CMSampleBuffers directly inside Swift
+        // In Tier 3, RPScreenRecorder / MediaProjection pushes frames directly in native code
         return;
       }
       _encodingFrame = true;
       try {
+        // Check if Android hardware PixelCopy is already feeding the MediaCodec Surface at 60fps
+        final nativeCopyActive =
+            await _method.invokeMethod<bool>('isNativePixelCopyActive') ?? false;
+        if (nativeCopyActive) {
+          return;
+        }
+
         final ctx = repaintBoundaryKey.currentContext;
-        if (ctx == null) return;
+        if (ctx == null || !ctx.mounted) return;
         final boundary = ctx.findRenderObject() as RenderRepaintBoundary?;
         if (boundary == null || !boundary.hasSize) return;
         final pixelRatio = (width / boundary.size.width).clamp(0.5, 2.0);
@@ -132,6 +139,22 @@ class IosVideoPipelineBridge {
         _encodingFrame = false;
       }
     });
+  }
+
+  /// Launches a native app (Waze, Google Maps, YouTube, Spotify) on the phone while streaming.
+  Future<bool> launchExternalApp({
+    required String packageName,
+    String fallbackUrl = '',
+  }) async {
+    try {
+      final ok = await _method.invokeMethod<bool>('launchExternalApp', {
+        'package': packageName,
+        'url': fallbackUrl,
+      });
+      return ok ?? false;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Requests an immediate IDR keyframe from `VTCompressionSession`.

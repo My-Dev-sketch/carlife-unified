@@ -45,19 +45,21 @@ class _BydReceiverScreenState extends State<BydReceiverScreen> {
   Timer? _probeTimer;
   CarLifeReceiverSession? _receiverSession;
 
-  String _status = 'Listening for iPhone 15 Pro Max on UDP 7999 / Hotspot...';
+  String _status =
+      'Auto-detecting Phone Hotspot (POCO F7 / Android / iPhone) on Wi-Fi...';
   String _connectedPhoneIp = '';
+  String _detectedGatewayIp = '';
+  String _detectedLocalIp = '';
+  bool _dialingInProgress = false;
   int _framesReceived = 0;
   int _fpsMeasured = 0;
   int _framesInCurrentSecond = 0;
   Timer? _fpsTimer;
 
   // Live HUD & Now Playing Metadata received over CarLife CMD 7240
-  String _songTitle = 'Waiting for iPhone Media...';
-  String _songArtist = 'Connect iPhone Hotspot or Wi-Fi';
-  String _hudRoad = '';
-  int _hudMeters = 0;
-  bool _showOverlayBar = true;
+  String _songTitle = 'Waiting for Phone Media...';
+  String _songArtist = 'Connect Phone Hotspot + Bluetooth to BYD';
+  bool _showOverlayBar = false;
 
   @override
   void initState() {
@@ -104,7 +106,7 @@ class _BydReceiverScreenState extends State<BydReceiverScreen> {
           final msg = utf8.decode(dg.data, allowMalformed: true);
           if (msg.contains('CarlifeHost') || msg.contains('carlifehost')) {
             final ip = dg.address.address;
-            if (_receiverSession?.connected != true) {
+            if (_receiverSession?.connected != true && !_dialingInProgress) {
               _connectToIphone(ip);
             }
           }
@@ -112,82 +114,140 @@ class _BydReceiverScreenState extends State<BydReceiverScreen> {
       });
     } catch (_) {}
 
-    // Also actively probe UDP 8999 for iPhone Personal Hotspot gateway (172.20.10.1) & subnet broadcast
-    _probeTimer = Timer.periodic(const Duration(seconds: 3), (_) {
-      if (_receiverSession?.connected == true) return;
-      final probePayload = utf8.encode('{"carlifehost":"byd_qin_plus"}');
-      for (final target in [
-        '172.20.10.1',
-        '192.168.43.1',
-        '255.255.255.255',
-      ]) {
-        try {
-          _udpListener?.send(
-            probePayload,
-            InternetAddress(target),
-            CarLifeProtocol.helloPort,
-          );
-        } catch (_) {}
-      }
+    // Immediately inspect Wi-Fi gateway and start 2-second auto-connect loop
+    _probeGatewayAndConnect();
+    _probeTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      _probeGatewayAndConnect();
     });
   }
 
-  Future<void> _connectToIphone(String ip) async {
-    if (ip.trim().isEmpty) return;
-    await _receiverSession?.stop();
-    setState(() {
-      _connectedPhoneIp = ip.trim();
-      _manualIpCtrl.text = _connectedPhoneIp;
-      _status = 'Dialing iPhone 15 Pro Max at $_connectedPhoneIp:7240...';
-    });
+  Future<void> _probeGatewayAndConnect() async {
+    if (_receiverSession?.connected == true || _dialingInProgress) return;
 
-    final link = WifiClientChannelLink(
-      host: _connectedPhoneIp,
-      ports: CarLifeProtocol.defaultPorts,
-    );
-    final session = CarLifeReceiverSession(
-      link: link,
-      targetWidth: 1920,
-      targetHeight: 1080,
-      targetFps: 60,
-    );
-
-    session.onStatus = _updateStatus;
-    session.onVideoNal = (Uint8List h264AnnexB, int timestamp) {
-      _framesReceived++;
-      _framesInCurrentSecond++;
-      try {
-        _decoderChannel.invokeMethod<void>('feedH264Nal', {
-          'nal': h264AnnexB,
-          'ptsUs': timestamp * 1000000,
-        });
-      } catch (_) {}
-      if (_framesReceived == 1 && mounted) {
-        setState(() {});
+    String gatewayIp = '';
+    String broadcastIp = '255.255.255.255';
+    try {
+      final info = await _decoderChannel
+          .invokeMapMethod<String, String>('getWifiGatewayInfo');
+      if (info != null) {
+        gatewayIp = (info['gatewayIp'] ?? '').trim();
+        broadcastIp = (info['broadcastIp'] ?? '255.255.255.255').trim();
+        final localIp = (info['localIp'] ?? '').trim();
+        if (mounted &&
+            (gatewayIp != _detectedGatewayIp || localIp != _detectedLocalIp)) {
+          setState(() {
+            _detectedGatewayIp = gatewayIp;
+            _detectedLocalIp = localIp;
+            if (gatewayIp.isNotEmpty) {
+              _manualIpCtrl.text = gatewayIp;
+            }
+          });
+        }
       }
-    };
-    session.onMediaPcm = (Uint8List pcm) {
-      try {
-        _decoderChannel.invokeMethod<void>('feedPcmAudio', {'pcm': pcm});
-      } catch (_) {}
-    };
-    session.onSongMetadata = (title, artist, album, durationMs) {
-      if (!mounted) return;
-      setState(() {
-        _songTitle = title.isEmpty ? 'iPhone Audio' : title;
-        _songArtist = artist;
-      });
-    };
-    session.onNavigationHud = (turnCode, road, remainingMeters) {
-      if (!mounted) return;
-      setState(() {
-        _hudRoad = road;
-        _hudMeters = remainingMeters;
-      });
-    };
+    } catch (_) {}
 
-    _receiverSession = session;
-    await session.start();
+    final probePayload = utf8.encode('{"carlifehost":"byd_qin_plus"}');
+    final targets = <String>{
+      if (gatewayIp.isNotEmpty) gatewayIp,
+      if (broadcastIp.isNotEmpty) broadcastIp,
+      '172.20.10.1',
+      '192.168.43.1',
+      '255.255.255.255',
+    };
+    for (final target in targets) {
+      try {
+        _udpListener?.send(
+          probePayload,
+          InternetAddress(target),
+          CarLifeProtocol.helloPort,
+        );
+      } catch (_) {}
+    }
+
+    // Direct TCP auto-connect to the detected Phone Hotspot Gateway (POCO F7 10.x.x.x or iPhone 172.20.10.1)
+    if (gatewayIp.isNotEmpty &&
+        _receiverSession?.connected != true &&
+        !_dialingInProgress) {
+      await _connectToIphone(gatewayIp);
+    }
+  }
+
+  Future<void> _connectToIphone(String ip) async {
+    final targetIp = ip.trim();
+    if (targetIp.isEmpty || _dialingInProgress) return;
+    _dialingInProgress = true;
+    try {
+      await _receiverSession?.stop();
+      if (mounted) {
+        setState(() {
+          _connectedPhoneIp = targetIp;
+          _manualIpCtrl.text = _connectedPhoneIp;
+          _status = 'Connecting to Phone at $_connectedPhoneIp:7240...';
+        });
+      }
+
+      final link = WifiClientChannelLink(
+        host: _connectedPhoneIp,
+        ports: CarLifeProtocol.defaultPorts,
+      );
+      final session = CarLifeReceiverSession(
+        link: link,
+        targetWidth: 1920,
+        targetHeight: 1080,
+        targetFps: 60,
+      );
+
+      session.onStatus = (msg) {
+        _updateStatus(msg);
+        if (session.negotiatedStreamWidth > 0 &&
+            session.negotiatedStreamHeight > 0) {
+          try {
+            _decoderChannel.invokeMethod<void>('updateSurfaceSize', {
+              'width': session.negotiatedStreamWidth,
+              'height': session.negotiatedStreamHeight,
+            });
+          } catch (_) {}
+        }
+      };
+      session.onVideoNal = (Uint8List h264AnnexB, int timestamp) {
+        _framesReceived++;
+        _framesInCurrentSecond++;
+        try {
+          _decoderChannel.invokeMethod<void>('feedH264Nal', {
+            'nal': h264AnnexB,
+            'ptsUs': timestamp * 1000000,
+          });
+        } catch (_) {}
+        if (_framesReceived == 1 && mounted) {
+          setState(() {
+            _showOverlayBar = false;
+          });
+        }
+      };
+      session.onMediaPcm = (Uint8List pcm) {
+        try {
+          _decoderChannel.invokeMethod<void>('feedPcmAudio', {'pcm': pcm});
+        } catch (_) {}
+      };
+      session.onSongMetadata = (title, artist, album, durationMs) {
+        if (!mounted) return;
+        setState(() {
+          _songTitle = title.isEmpty ? 'Phone Audio' : title;
+          _songArtist = artist;
+        });
+      };
+      session.onNavigationHud = (turnCode, road, remainingMeters) {
+        if (!mounted) return;
+        setState(() {
+          _status = 'HUD: ${remainingMeters}m → $road';
+        });
+      };
+
+      _receiverSession = session;
+      await session.start();
+    } finally {
+      _dialingInProgress = false;
+    }
   }
 
   void _updateStatus(String msg) {
@@ -225,77 +285,106 @@ class _BydReceiverScreenState extends State<BydReceiverScreen> {
     final isStreaming =
         _receiverSession?.connected == true && _framesReceived > 0;
     return Scaffold(
-      backgroundColor: const Color(0xFF060911),
+      backgroundColor: Colors.black,
       body: LayoutBuilder(
         builder: (context, constraints) {
           final w = constraints.maxWidth;
           final h = constraints.maxHeight;
-          return GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onPanDown: (d) {
-              _receiverSession?.sendTouch(
-                action: CarTouch.down,
-                localX: d.localPosition.dx,
-                localY: d.localPosition.dy,
-                viewWidth: w,
-                viewHeight: h,
-              );
-            },
-            onPanUpdate: (d) {
-              _receiverSession?.sendTouch(
-                action: CarTouch.move,
-                localX: d.localPosition.dx,
-                localY: d.localPosition.dy,
-                viewWidth: w,
-                viewHeight: h,
-              );
-            },
-            onPanEnd: (d) {
-              _receiverSession?.sendTouch(
-                action: CarTouch.up,
-                localX: 0,
-                localY: 0,
-                viewWidth: w,
-                viewHeight: h,
-              );
-            },
-            onTapUp: (d) {
-              _receiverSession?.sendTouch(
-                action: CarTouch.up,
-                localX: d.localPosition.dx,
-                localY: d.localPosition.dy,
-                viewWidth: w,
-                viewHeight: h,
-              );
-            },
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                if (_textureId != null && isStreaming)
-                  Texture(textureId: _textureId!)
-                else
-                  _buildDiscoveryLandingView(),
-                if (_hudRoad.isNotEmpty) _buildBydHudOverlay(),
-                if (_showOverlayBar) _buildTopDiLinkControlBar(),
-                Positioned(
-                  bottom: 14,
-                  right: 14,
-                  child: FloatingActionButton.small(
-                    backgroundColor:
-                        const Color(0xFF1E293B).withValues(alpha: 0.85),
-                    onPressed: () =>
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              if (_textureId != null && isStreaming)
+                Positioned.fill(
+                  child: Listener(
+                    behavior: HitTestBehavior.opaque,
+                    onPointerDown: (e) {
+                      _receiverSession?.sendTouch(
+                        action: CarTouch.down,
+                        localX: e.localPosition.dx,
+                        localY: e.localPosition.dy,
+                        viewWidth: w,
+                        viewHeight: h,
+                      );
+                    },
+                    onPointerMove: (e) {
+                      _receiverSession?.sendTouch(
+                        action: CarTouch.move,
+                        localX: e.localPosition.dx,
+                        localY: e.localPosition.dy,
+                        viewWidth: w,
+                        viewHeight: h,
+                      );
+                    },
+                    onPointerUp: (e) {
+                      _receiverSession?.sendTouch(
+                        action: CarTouch.up,
+                        localX: e.localPosition.dx,
+                        localY: e.localPosition.dy,
+                        viewWidth: w,
+                        viewHeight: h,
+                      );
+                    },
+                    onPointerCancel: (e) {
+                      _receiverSession?.sendTouch(
+                        action: CarTouch.up,
+                        localX: e.localPosition.dx,
+                        localY: e.localPosition.dy,
+                        viewWidth: w,
+                        viewHeight: h,
+                      );
+                    },
+                    child: SizedBox.expand(
+                      child: Texture(
+                        textureId: _textureId!,
+                        filterQuality: FilterQuality.medium,
+                      ),
+                    ),
+                  ),
+                )
+              else
+                _buildDiscoveryLandingView(),
+              if (_showOverlayBar) _buildTopDiLinkControlBar(),
+              Positioned(
+                bottom: 10,
+                right: 10,
+                child: Material(
+                  color: const Color(0xFF0F172A).withValues(alpha: 0.72),
+                  borderRadius: BorderRadius.circular(999),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(999),
+                    onTap: () =>
                         setState(() => _showOverlayBar = !_showOverlayBar),
-                    child: Icon(
-                      _showOverlayBar
-                          ? CupertinoIcons.eye_slash_fill
-                          : CupertinoIcons.eye_fill,
-                      color: Colors.white,
-                      size: 18,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _showOverlayBar
+                                ? CupertinoIcons.xmark_circle_fill
+                                : CupertinoIcons.slider_horizontal_3,
+                            color: const Color(0xFF38BDF8),
+                            size: 14,
+                          ),
+                          const SizedBox(width: 5),
+                          Text(
+                            isStreaming ? '${_fpsMeasured}fps' : 'Menu',
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           );
         },
       ),
@@ -310,7 +399,7 @@ class _BydReceiverScreenState extends State<BydReceiverScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(
-          color: const Color(0xFF0F172A).withValues(alpha: 0.88),
+          color: const Color(0xFF0F172A).withValues(alpha: 0.92),
           borderRadius: BorderRadius.circular(18),
           border: Border.all(color: Colors.white12),
         ),
@@ -345,7 +434,7 @@ class _BydReceiverScreenState extends State<BydReceiverScreen> {
               onPressed: _openNativeBydWazeSplitScreen,
               icon: const Icon(Icons.map_rounded, size: 16),
               label: const Text(
-                'Open BYD Waze Split-Screen',
+                'BYD Waze Split-Screen',
                 style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
               ),
             ),
@@ -360,40 +449,6 @@ class _BydReceiverScreenState extends State<BydReceiverScreen> {
               tooltip: 'Request Fresh Keyframe',
               onPressed: () => _receiverSession?.requestKeyframe(),
               icon: const Icon(Icons.refresh, color: Colors.white70, size: 20),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBydHudOverlay() {
-    return Positioned(
-      top: 74,
-      left: 16,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        decoration: BoxDecoration(
-          color: const Color(0xFF064E3B).withValues(alpha: 0.92),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0xFF34D399)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(
-              CupertinoIcons.arrow_turn_up_right,
-              color: Colors.white,
-              size: 24,
-            ),
-            const SizedBox(width: 10),
-            Text(
-              '$_hudMeters m → $_hudRoad',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 15,
-                fontWeight: FontWeight.w800,
-              ),
             ),
           ],
         ),
@@ -419,13 +474,13 @@ class _BydReceiverScreenState extends State<BydReceiverScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             const Icon(
-              CupertinoIcons.wifi_exclamationmark,
+              CupertinoIcons.wifi,
               color: Color(0xFF38BDF8),
               size: 48,
             ),
             const SizedBox(height: 12),
             const Text(
-              'BYD Qin Plus • Wireless CarPlay / CarLife 60fps Receiver',
+              'BYD Qin Plus • Wireless Android Auto & CarPlay Receiver',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: Colors.white,
@@ -439,6 +494,14 @@ class _BydReceiverScreenState extends State<BydReceiverScreen> {
               textAlign: TextAlign.center,
               style: const TextStyle(color: Color(0xFF34D399), fontSize: 14),
             ),
+            if (_detectedGatewayIp.isNotEmpty || _detectedLocalIp.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                'BYD IP: ${_detectedLocalIp.isEmpty ? "detecting..." : _detectedLocalIp}  •  Phone Hotspot Gateway: ${_detectedGatewayIp.isEmpty ? "detecting..." : _detectedGatewayIp}',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white60, fontSize: 12),
+              ),
+            ],
             const SizedBox(height: 18),
             Row(
               children: [
@@ -448,7 +511,7 @@ class _BydReceiverScreenState extends State<BydReceiverScreen> {
                     style: const TextStyle(color: Colors.white),
                     decoration: InputDecoration(
                       labelText:
-                          'iPhone 15 Pro Max Hotspot / Wi-Fi IP (Default: 172.20.10.1)',
+                          'Phone Hotspot IP (Auto-detected from POCO F7 / iPhone)',
                       filled: true,
                       fillColor: const Color(0xFF1F2937),
                       border: OutlineInputBorder(

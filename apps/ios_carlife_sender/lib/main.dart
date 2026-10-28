@@ -8,6 +8,7 @@ import 'features/video_pipeline/ios_video_pipeline_bridge.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,
@@ -115,7 +116,7 @@ class _IosCarLifeSenderAppState extends State<IosCarLifeSenderApp> {
       theme: ThemeData.dark(useMaterial3: true),
       home: Scaffold(
         backgroundColor: Colors.black,
-        body: SafeArea(
+        body: SizedBox.expand(
           child: RepaintBoundary(
             key: _dashboardRepaintKey,
             child: CarPlayDashboardView(

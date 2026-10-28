@@ -119,6 +119,21 @@ class CarDiscoveryService {
       for (final t in targetAddresses()) {
         targets[t.address] = t;
       }
+      try {
+        final interfaces = await NetworkInterface.list(
+          includeLoopback: false,
+          type: InternetAddressType.IPv4,
+        );
+        for (final iface in interfaces) {
+          for (final addr in iface.addresses) {
+            final parts = addr.address.split('.');
+            if (parts.length == 4) {
+              final bcast = '${parts[0]}.${parts[1]}.${parts[2]}.255';
+              targets[bcast] = InternetAddress(bcast);
+            }
+          }
+        }
+      } catch (_) {}
       for (final addr in targets.values) {
         try {
           _beaconSocket?.send(
