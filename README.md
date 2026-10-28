@@ -1,85 +1,70 @@
-# CarLife Unified 60fps Wireless Suite (`iPhone 15 Pro Max` → `Toyota Corolla Hybrid` & `BYD Qin Plus`)
+# CarLife Unified 60fps Wireless Suite (`POCO Android` & `iPhone 15 Pro Max` → `BYD Qin Plus` & `Toyota Corolla Hybrid`)
 
-A Feature-First monorepo that ports the wireless **Baidu CarLife 6-Channel TCP/UDP/Crypto protocol** from [`OneAboveAll1964/ft-app`](https://github.com/OneAboveAll1964/ft-app) to **iOS (Flutter + Swift `VideoToolbox` / `ReplayKit`)** and **Android Automotive (`BYD Qin Plus` DiLink OS `MediaCodec` SurfaceTexture Receiver)**.
+A Feature-First monorepo that ports the wireless **Baidu CarLife 6-Channel TCP/UDP/Crypto protocol** from [`OneAboveAll1964/ft-app`](https://github.com/OneAboveAll1964/ft-app) into two simple apps that work together **100% Wirelessly (Zero Cables)**:
 
-Built for **100% wireless operation (Zero Cables)** via iPhone Personal Hotspot, Car Wi-Fi, UDP Discovery (`7999` / `8999`), and Bluetooth A2DP/HFP, with **100% Free Navigation (Zero Map API Keys)**.
-
----
-
-## Monorepo Architecture
-
-```text
-carlife_unified/
-├── packages/
-│   └── carlife_protocol/          # Pure Dart port of ft-app's 6-channel CarLife protocol
-│       ├── lib/src/
-│       │   ├── carlife_protocol_constants.dart  # Channels 1..6 (7240, 8240, 9240, 9241, 9242, 9340) + Service IDs
-│       │   ├── carlife_framing.dart             # 8B Command/Touch & 12B Video/Audio framing ([Len][TS][ServiceId])
-│       │   ├── carlife_crypto.dart              # RSA-2048 X.509 SPKI + AES-128-ECB session encryption
-│       │   ├── car_discovery.dart               # UDP 7999 "CarlifeHost" Beacon + UDP 8999 JSON Responder + ICCOA BLE
-│       │   ├── carlife_link.dart                # Dual-Role TCP Server (Hotspot) & TCP Client (Car Wi-Fi)
-│       │   ├── carlife_session.dart             # Phone Sender state machine (spoofs os="Android" for Toyota DesaySV)
-│       │   ├── carlife_receiver_session.dart    # BYD Qin Plus Head Unit Receiver state machine
-│       │   ├── video_feed.dart                  # Annex-B H.264 SPS/PPS cache + IDR keyframe prepend + FPS gate
-│       │   ├── video_plan.dart                  # Vehicle profiles (Toyota Corolla 1280x720@60, BYD Qin Plus 1920x1080@60)
-│       │   └── media_and_navigation.dart        # CarLife PCM Audio, Media Metadata (0x00010035), HUD Turn Info (0x00010030)
-│       └── test/
-│           └── carlife_protocol_test.dart       # Full 6-channel TCP loopback handshake, H.264 framing, AES-128, & touch tests
-│
-├── apps/
-│   ├── ios_carlife_sender/        # iPhone 15 Pro Max Sender App (Flutter + Swift VideoToolbox / ReplayKit)
-│   │   ├── ios/Runner/AppDelegate.swift         # Hardware VTCompressionSession H.264 (Baseline, 0 B-frames), ReplayKit, MediaPlayer
-│   │   └── lib/features/
-│   │       ├── carplay_dashboard/               # iOS 18 CarPlay Split Dashboard + Full Map + Dialer + 3-Tier Mirroring
-│   │       ├── navigation/                      # Zero-Key OSRM Turn-by-Turn + OpenStreetMap + Waze Deep-Link / Embed
-│   │       ├── touch_dispatcher/                # Normalizes car touches -> WidgetsBinding.instance.handlePointerEvent
-│   │       └── video_pipeline/                  # RepaintBoundary 60fps capture + VideoToolbox Method/EventChannel bridge
-│   │
-│   └── byd_qin_receiver/          # BYD Qin Plus DiLink OS Receiver APK (Flutter + Kotlin MediaCodec SurfaceTexture)
-│       ├── android/app/src/main/kotlin/.../MainActivity.kt  # Low-latency MediaCodec video/avc + AudioTrack + Waze Split-Screen
-│       └── lib/main.dart                        # Auto-discovery UDP listener, 60fps zero-copy Texture view, Touch injector
-│
-└── codemagic.yaml                 # CI/CD for iOS App Store Connect / TestFlight IPA & BYD Qin Plus Release APK
-```
+1. **The Car Screen Receiver APK (`byd-qin-plus-carlife-receiver-v1.0.0.apk`)**: Installed on your **BYD Qin Plus DiLink screen** (note: your Chinese Toyota Corolla already has Baidu CarLife built into its factory screen).
+2. **The Cross-Platform Phone Sender App (`carlife-sender-android-v1.0.0.apk` for Android / TestFlight IPA for iPhone 15 Pro Max)**: Installed on your **POCO Android phone** or **iPhone 15 Pro Max**. It streams the 60fps CarPlay-style Dashboard (or full phone screen mirroring) to the car screen and receives your car touchscreen taps back.
 
 ---
 
-## How Wireless Connection Works (No Cable Required)
+## Direct APK Downloads (GitHub Release `v1.0.0`)
 
-### 1. Chinese-Spec Toyota Corolla Hybrid (Built-in Baidu CarLife Receiver)
-1. Enable **Personal Hotspot** on your **iPhone 15 Pro Max** (and connect your Corolla's Wi-Fi to your iPhone's Hotspot, just like the Android workflow in `ft-app`).
-2. Keep your iPhone connected to the Corolla's **Bluetooth** for crystal-clear native A2DP music & hands-free calls (`Bluetooth Audio Mode` is ON by default).
-3. Open **CarLife 60fps (`ios_carlife_sender`)** on your iPhone 15 Pro Max and select **Toyota Corolla Hybrid (1280x720 @ 60fps)**.
-4. The iPhone opens the 6 CarLife TCP listeners (`7240`, `8240`, `9240`, `9241`, `9242`, `9340`) and broadcasts `"CarlifeHost"` on UDP port `7999` while answering discovery probes on UDP `8999`.
-5. Tap **Baidu CarLife (百度CarLife)** on the Toyota Corolla screen:
-   - The iPhone answers `CMD_PROTOCOL_VERSION_MATCH_STATUS` and sends `CMD_MD_INFO` with `os="Android"` so the Toyota DesaySV head unit accepts the iPhone immediately.
-   - Hardware H.264 60fps video (`0x00020001`), turn-by-turn instrument cluster HUD (`0x00010030`), and song metadata (`0x00010035`) stream wirelessly, and every tap/drag on the Corolla touchscreen dispatches into the CarPlay UI.
-
-### 2. BYD Qin Plus (DiLink Android OS)
-1. Install the **`byd_qin_receiver` APK** (`apps/byd_qin_receiver/build/app/outputs/flutter-apk/app-release.apk`) onto the BYD Qin Plus DiLink screen.
-2. Connect the BYD Qin Plus Wi-Fi to your **iPhone 15 Pro Max Personal Hotspot** (or connect both to the same Wi-Fi hotspot).
-3. Open **BYD CarLife 60fps Receiver** on the BYD screen and **CarLife 60fps** on your iPhone (set to **BYD Qin Plus 1920x1080 @ 60fps**).
-4. The BYD screen automatically hears the iPhone's UDP `7999` `"CarlifeHost"` broadcast (or connects to `172.20.10.1`) and renders the 60fps hardware `MediaCodec` stream with full multi-touch feedback.
-5. **Running Waze Side-by-Side on BYD Qin Plus**: Tap **"Open BYD Waze Split-Screen"** in the top HUD bar on the BYD screen to launch the BYD's native Waze app (`com.waze`) in Android Split-Screen (`FLAG_ACTIVITY_LAUNCH_ADJACENT`) or Picture-in-Picture mode alongside your iPhone CarPlay dashboard!
+- **Release Page**: [`https://github.com/My-Dev-sketch/carlife-unified/releases/tag/v1.0.0`](https://github.com/My-Dev-sketch/carlife-unified/releases/tag/v1.0.0)
+- **1. Car Screen APK (Install on BYD Qin Plus)**: [`byd-qin-plus-carlife-receiver-v1.0.0.apk`](https://github.com/My-Dev-sketch/carlife-unified/releases/download/v1.0.0/byd-qin-plus-carlife-receiver-v1.0.0.apk)
+- **2. Phone Sender APK (Install on POCO Android Phone)**: [`carlife-sender-android-v1.0.0.apk`](https://github.com/My-Dev-sketch/carlife-unified/releases/download/v1.0.0/carlife-sender-android-v1.0.0.apk)
+- **3. Original `ft-app` Android APK (Optional for POCO)**: [`ft-app-sender-v1.0.0.apk`](https://github.com/My-Dev-sketch/carlife-unified/releases/download/v1.0.0/ft-app-sender-v1.0.0.apk)
 
 ---
 
-## 3-Tier Projection & Touch Fallback System
+## Full Step-by-Step Testing Guide
 
-| Tier | Mode | Description | Car Touchscreen Support |
-| :--- | :--- | :--- | :--- |
-| **Tier 1 (Primary)** | **Hybrid 60fps CarPlay Dashboard + ReplayKit** | Streams the interactive CarPlay Split-Screen Dashboard (Maps, Waze, Music, Phone, HUD) at 60fps and provides one-tap `RPSystemBroadcastPickerView` / `RPScreenRecorder` mirroring. | **100% Live Touch** in Dashboard |
-| **Tier 2 (Fallback 1)** | **Pure In-App CarPlay UI** | Automatically stays in the 60fps CarPlay Dashboard if iOS ReplayKit system recording is declined or unavailable. | **100% Live Touch** |
-| **Tier 3 (Fallback 2)** | **Full-Screen iPhone Mirroring** | Captures full iOS frames via `RPScreenRecorder.shared().startCapture` -> `VTCompressionSession` H.264 Annex-B -> Car screen. | View-Only Mirroring (iOS security sandbox) |
+### Part 1: Test First with Your POCO Android Phone + BYD Qin Plus (Zero Cables)
+
+#### Step 1 — Install the 2 APKs
+1. **On your BYD Qin Plus car screen**:
+   - Download and install **[`byd-qin-plus-carlife-receiver-v1.0.0.apk`](https://github.com/My-Dev-sketch/carlife-unified/releases/download/v1.0.0/byd-qin-plus-carlife-receiver-v1.0.0.apk)** (via the BYD browser from your GitHub Release link, or via a USB flash drive plugged into the BYD data port).
+2. **On your POCO Android phone**:
+   - Download and install **[`carlife-sender-android-v1.0.0.apk`](https://github.com/My-Dev-sketch/carlife-unified/releases/download/v1.0.0/carlife-sender-android-v1.0.0.apk)** (and optionally **[`ft-app-sender-v1.0.0.apk`](https://github.com/My-Dev-sketch/carlife-unified/releases/download/v1.0.0/ft-app-sender-v1.0.0.apk)** if you also want to compare the original `ft-app` on the BYD screen).
+
+#### Step 2 — Connect Hotspot & Bluetooth
+1. On your **POCO phone**, turn ON **Personal Hotspot (Wi-Fi Hotspot)**.
+2. On your **BYD Qin Plus screen**, connect the car's **Wi-Fi** to your **POCO phone's Hotspot**.
+3. Pair your **POCO phone's Bluetooth** to the **BYD Qin Plus Bluetooth** (this handles crystal-clear car speaker audio & calls automatically).
+
+#### Step 3 — Start Streaming at 60fps
+1. Open **CarLife 60fps Phone Sender** on your **POCO phone**:
+   - Make sure the top vehicle selector is set to **`BYD Qin Plus (1920x1080 @ 60fps)`**.
+   - The POCO phone immediately opens the 6 CarLife TCP ports (`7240`, `8240`, `9240`, `9241`, `9242`, `9340`) and broadcasts `"CarlifeHost"` on UDP port `7999`.
+2. Open **BYD CarLife 60fps Receiver** on your **BYD Qin Plus screen**:
+   - The BYD screen automatically detects the `"CarlifeHost"` UDP broadcast from your POCO phone and connects within 1–2 seconds!
+   - *(Tip: If Xiaomi/HyperOS Hotspot isolates UDP broadcast on your POCO phone, simply type your POCO's hotspot gateway IP—usually `192.168.43.1` or `192.168.232.1`, or check Wi-Fi Gateway details on the BYD screen—into the IP box on the BYD screen and tap **Connect Now**).*
+3. **Test Features on the BYD Screen**:
+   - **Touch Control**: Tap **Map**, **Dialer**, **Split Dashboard**, or search any destination on the BYD touchscreen—your touches are sent back to the POCO phone in real time.
+   - **Full Phone Screen Mirroring**: Tap **Mirror Phone** on the left sidebar and accept the Android screen capture prompt on your POCO to mirror your entire POCO screen (YouTube, Waze, Google Maps, any app) at 60fps!
+   - **Waze Split-Screen on BYD**: Tap **"Open BYD Waze Split-Screen"** at the top of the BYD receiver screen to run BYD's native Waze side-by-side with your phone stream.
 
 ---
 
-## Deploying `ios_carlife_sender` to TestFlight via Codemagic
+### Part 2: Test Your POCO Android Phone on the Toyota Corolla Hybrid
 
-1. Log in to [Codemagic](https://codemagic.io/) and connect the **`My-Dev-Sketch/carlife-unified`** GitHub repository.
-2. In Codemagic **Teams / Integrations → Developer Portal**, connect your **App Store Connect API Key** (named `codemagic` as referenced in `codemagic.yaml`).
-3. Ensure the Bundle ID `com.mydevsketch.iosCarlifeSender` is registered in your Apple Developer Portal and an App record exists in App Store Connect.
-4. Trigger the **`ios-carlife-sender-testflight`** workflow in Codemagic:
-   - Runs `dart test` on `packages/carlife_protocol`
-   - Runs `flutter analyze` and `flutter test` on `apps/ios_carlife_sender`
-   - Automatically provisions certificates, increments the TestFlight build number, builds the signed `.ipa`, and uploads it directly to **App Store Connect / TestFlight** for installation on your **iPhone 15 Pro Max**.
+1. Keep **Personal Hotspot** ON on your **POCO phone**, and connect the **Toyota Corolla's Wi-Fi** to your POCO Hotspot (and connect Bluetooth).
+2. Open **CarLife 60fps Phone Sender** on your POCO phone and tap the top selector to switch to **`Toyota Corolla Hybrid (1280x720 @ 60fps)`** (or open `ft-app-sender-v1.0.0.apk`).
+3. Tap **Baidu CarLife (百度CarLife)** on the Toyota Corolla's factory screen—it will discover your POCO phone on UDP `7999` / `8999` and project wirelessly!
+
+---
+
+### Part 3: Test Second with Your iPhone 15 Pro Max (on Both BYD Qin Plus & Toyota Corolla)
+
+#### Step 1 — Install on iPhone 15 Pro Max via Codemagic / TestFlight
+1. Log in to [Codemagic](https://codemagic.io/) and add your GitHub repository **[`My-Dev-sketch/carlife-unified`](https://github.com/My-Dev-sketch/carlife-unified)**.
+2. Connect your **App Store Connect API Key** (`codemagic`) under Integrations and run the **`ios-carlife-sender-testflight`** workflow from [`codemagic.yaml`](file:///c:/Users/MohammedYousif/apps/carlife_unified/codemagic.yaml).
+3. Install **CarLife 60fps** from **TestFlight** onto your **iPhone 15 Pro Max**.
+
+#### Step 2 — Connect Wirelessly to BYD Qin Plus or Toyota Corolla
+1. Turn ON **Personal Hotspot** on your **iPhone 15 Pro Max** (`Settings → Personal Hotspot → Allow Others to Join`, with **Maximize Compatibility** enabled).
+2. Connect your **BYD Qin Plus** (or **Toyota Corolla**) Wi-Fi to your iPhone's Hotspot, and connect Bluetooth.
+3. Open **CarLife 60fps** on your **iPhone 15 Pro Max**:
+   - When asked by iOS *"Allow CarLife 60fps to find and connect to devices on your local network"*, tap **Allow**.
+   - Select **`BYD Qin Plus (1920x1080 @ 60fps)`** or **`Toyota Corolla Hybrid (1280x720 @ 60fps)`**.
+4. **On BYD Qin Plus**: Open **BYD CarLife 60fps Receiver**—it automatically connects to your iPhone's Hotspot IP (`172.20.10.1`)!
+5. **On Toyota Corolla**: Tap **Baidu CarLife (百度CarLife)** on the factory screen—our iPhone app spoofs `os="Android"` in `CMD_MD_INFO` so the Corolla's DesaySV head unit accepts your iPhone 15 Pro Max wirelessly!
